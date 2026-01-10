@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Seismo Observatory — Method</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; }
+    header { padding: 14px 18px; border-bottom: 1px solid rgba(127,127,127,.25); }
+    main { padding: 18px; max-width: 920px; }
+    h1 { margin: 0; font-size: 20px; }
+    h2 { margin-top: 22px; font-size: 16px; }
+    p, li { line-height: 1.5; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .box { border: 1px solid rgba(127,127,127,.25); border-radius: 10px; padding: 12px 14px; background: rgba(127,127,127,.06); }
+    a { color: inherit; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Seismo Observatory — Method</h1>
+  </header>
+
+  <main>
+    <div class="box">
+      <p>
+        Questo progetto è un <b>osservatorio</b>: raccoglie terremoti recenti (USGS) e mostra
+        <b>anomalie statistiche</b> nella distribuzione spaziale degli eventi.
+        <br/>
+        <b>Non</b> predice il singolo terremoto in modo deterministico.
+      </p>
+      <p>
+        Torna alla dashboard: <a href="./index.html"><b>Home</b></a>
+      </p>
+    </div>
+
+    <h2>Dati</h2>
+    <ul>
+      <li>Fonte: catalogo USGS (GeoJSON).</li>
+      <li>Campi usati: posizione (lat/lon), tempo (epoch ms), magnitudo.</li>
+      <li>Finestre temporali: ultimi 30 giorni per il baseline, ultimi 7 giorni per la “recente attività”.</li>
+    </ul>
+
+    <h2>Griglia e aggregazione</h2>
+    <p>
+      Il pianeta viene diviso in celle lat/lon:
+      <code>1° × 1°</code> (World) oppure <code>0.25° × 0.25°</code> (Italy).
+      In ogni cella contiamo:
+    </p>
+    <ul>
+      <li><code>count_30d</code>: numero di eventi negli ultimi 30 giorni</li>
+      <li><code>count_7d</code>: numero di eventi negli ultimi 7 giorni</li>
+      <li><code>lambda_7</code>: atteso in 7 giorni stimato dal 30d: <code>(count_30d/30)*7</code></li>
+    </ul>
+
+    <h2>Z-score Poisson</h2>
+    <p>
+      Come “punteggio di anomalia” usiamo un’approssimazione di sorpresa per processi Poisson:
+    </p>
+    <p class="box">
+      <code>z = (count_7d - lambda_7) / sqrt(lambda_7 + 1)</code>
+    </p>
+    <p>
+      Intuizione: se la cella “di solito” fa ~1 evento in 7 giorni ma ora ne fa 6, z cresce.
+      Se la cella è normalmente attivissima (lambda alto), serve un aumento più forte per risultare anomala.
+    </p>
+
+    <h2>Filtro anti-rumore</h2>
+    <p>
+      Applichiamo <code>min_count_7d</code> (es. ≥2) per evitare che una singola scossa
+      renda “hot” una cella solo per caso.
+    </p>
+
+    <h2>Backtest (validazione)</h2>
+    <p>
+      Il backtest misura se le “celle hot” catturano più terremoti grandi di quanto farebbe una selezione casuale
+      di area equivalente.
+      Risultato riportato come <code>enrichment</code>:
+    </p>
+    <p class="box">
+      <code>enrichment = (quota grandi eventi in hot) / (quota area coperta da hot)</code>
+    </p>
+    <p>
+      Un valore &gt; 1 significa “meglio del caso”. Non implica predizione del singolo evento.
+    </p>
+
+    <h2>Limiti e avvertenze</h2>
+    <ul>
+      <li>I cataloghi possono avere completezza variabile (soprattutto per magnitudo piccole).</li>
+      <li>Il modello è intenzionalmente semplice: non include tettonica, faglie, o ETAS/Hawkes completi.</li>
+      <li>Gli aftershock generano cluster: lo scopo è evidenziarli, non eliminarli.</li>
+      <li>Qualsiasi uso operativo (allerta, safety) richiede modelli e validazione molto più rigorosi.</li>
+    </ul>
+
+    <h2>Prossimi miglioramenti</h2>
+    <ul>
+      <li>Smoothing spaziale (celle vicine) per cluster più stabili.</li>
+      <li>Backtest su storico lungo (mesi/anni), non solo finestra corta.</li>
+      <li>Modello ETAS/Hawkes per distinguere background vs aftershock.</li>
+    </ul>
+  </main>
+</body>
+</html>

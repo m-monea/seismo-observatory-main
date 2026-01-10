@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8"/>
+  <title>Seismo Observatory</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <style>
+    :root { color-scheme: light dark; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    header { padding:14px 16px; border-bottom:1px solid rgba(127,127,127,.25); }
+    h1 { margin:0 0 6px 0; font-size:20px; }
+    #meta,#stats { font-size:13px; opacity:.9; white-space:pre-wrap; }
+    .badge { display:inline-block; padding:4px 10px; border:1px solid rgba(127,127,127,.35); border-radius:999px; font-size:12px; margin-top:8px; }
+    main { display:grid; grid-template-columns: 440px 1fr; gap:12px; padding:12px; }
+    .box { border:1px solid rgba(127,127,127,.25); border-radius:10px; overflow:hidden; background: rgba(127,127,127,.06); }
+    .box h2 { margin:0; padding:8px 10px; background:rgba(127,127,127,.10); font-size:13px; }
+    .box .content { padding:10px; }
+    #map { height:620px; border-radius:10px; overflow:hidden; }
+    button { padding:6px 10px; border-radius:8px; border:1px solid rgba(127,127,127,.35); background:transparent; cursor:pointer; }
+    button.active { background: rgba(127,127,127,.20); }
+    table { width:100%; border-collapse:collapse; font-size:12px; }
+    th,td { border-bottom:1px solid rgba(127,127,127,.2); padding:5px; vertical-align:top; }
+    th { text-align:left; opacity:.9; }
+    .muted { opacity:.75; font-size:12px; }
+    input[type="range"]{ width:100%; }
+    @media (max-width: 1050px){
+      main { grid-template-columns: 1fr; }
+      #map { height:560px; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Seismo Observatory</h1>
+  <div id="meta">Loading…</div>
+  <div id="stats"></div>
+  <div id="bt" class="badge">Backtest: loading…</div>
+  <div class="muted" style="margin-top:8px;">
+    Heatmap = griglia 1°×1° (World) o 0.25° (Italy) con <b>z-score Poisson</b> (7d vs 30d). Non è predizione.
+  </div>
+  <div class="muted" style="margin-top:6px;">
+  <a href="./method.html">Method / Assunzioni & limiti</a>
+</div>
+
+</header>
+
+<main>
+  <section class="box">
+    <h2>View</h2>
+    <div class="content">
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button id="btnWorld" class="active">🌍 World</button>
+        <button id="btnItaly">🇮🇹 Italy</button>
+        <button id="btnReload">↻ Reload</button>
+      </div>
+
+      <div style="margin-top:12px;">
+        <label><b>Min Z</b>: <span id="zVal">2.0</span></label>
+        <input id="minZ" type="range" min="0" max="10" step="0.1" value="2.0"/>
+        <div class="muted" style="margin-top:6px;">
+          z≈0 normale · z≥2 insolito · z≥3 notevole · z≥5 rarissimo
+        </div>
+      </div>
+<div class="muted" style="margin-top:10px;">
+  <div><b>Legend (Z)</b></div>
+  <div>0–1: low · 1–2: mild · 2–3: unusual · 3–5: strong · 5+: extreme</div>
+</div>
+
+      <h3 style="margin:14px 0 6px 0; font-size:13px;">Top anomalous cells (z)</h3>
+      <div class="muted" style="margin-bottom:6px;">Clicca Zoom per centrare la mappa sulla cella.</div>
+      <div style="overflow:auto;">
+        <table>
+          <thead><tr><th>z</th><th>7d</th><th>λ7</th><th>maxM</th><th></th></tr></thead>
+          <tbody id="hot"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="box">
+    <h2>Map</h2>
+    <div class="content">
+      <div id="map"></div>
+    </div>
+  </section>
+</main>
+
+<script>
+let mode = "world";
+let eventsData = null;
+let gridData = null;
+let backtestData = null;
+
+const metaEl = document.getElementById("meta");
+const statsEl = document.getElementById("stats");
+const btEl = document.getElementById("bt");
+const hotEl = document.getElementById("hot");
+
+const btnWorld = document.getElementById("btnWorld");
+const btnItaly = document.getElementById("btnItaly");
+const btnReload = document.getElementById("btnReload");
+const minZEl = document.getElementById("minZ");
+const zValEl = document.getElementById("zVal");
+
+const map = L.map("map").setView([20,0],2);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18 }).addTo(map);
+
+const points = L.layerGroup().addTo(map);
+const heat = L.layerGroup().addTo(map);
+
+btnWorld.onclick = ()=>switchMode("world");
+btnItaly.onclick = ()=>switchMode("italy");
+btnReload.onclick = ()=>loadAll();
+
+function switchMode(m){
+  mode=m;
+  btnWorld.classList.toggle("active",m==="world");
+  btnItaly.classList.toggle("active",m==="italy");
+  loadAll();
+}
+
+function colorForZ(z){
+  if(z < 1) return "rgba(42,157,143,0.14)";
+  if(z < 2) return "rgba(233,196,106,0.20)";
+  if(z < 3) return "rgba(244,162,97,0.26)";
+  if(z < 5) return "rgba(231,111,81,0.32)";
+  return "rgba(208,0,0,0.38)";
+}
+
+function renderBacktest(){
+  if (!backtestData || backtestData.error){
+    btEl.textContent = "Backtest: unavailable";
+    return;
+  }
+  const enr = backtestData.enrichment;
+  const hits = backtestData.hits_in_hot;
+  const total = backtestData.large_events;
+  const zt = backtestData.threshold_z;
+  const tm = backtestData.target_mag;
+
+  const enrTxt = (enr == null) ? "—" : `${enr.toFixed(2)}×`;
+  btEl.textContent = `Backtest (World): z≥${zt}, M≥${tm} → ${hits}/${total} in hot cells · enrichment ${enrTxt}`;
+}
+
+function render(){
+  points.clearLayers();
+  heat.clearLayers();
+  hotEl.innerHTML = "";
+
+  const minZ = parseFloat(minZEl.value);
+  zValEl.textContent = minZ.toFixed(1);
+
+  const updated = eventsData?.meta?.generated_utc ?? "UNKNOWN";
+  metaEl.textContent = `Updated (UTC): ${updated} | Scope: ${mode}`;
+  statsEl.textContent = `Events: ${eventsData?.events?.length ?? 0} | Cells: ${gridData?.cells?.length ?? 0}`;
+
+  // Points (simple)
+  let plotted = 0;
+  for(const e of (eventsData.events || [])){
+    const lat = Number(e.lat), lon = Number(e.lon);
+    if(!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    L.circleMarker([lat,lon], { radius: 3, weight: 1, fillOpacity: .5 }).addTo(points);
+    plotted++;
+  }
+
+  // Heat rectangles
+  const cells = (gridData.cells || []);
+  let drawn = 0;
+  for(const c of cells){
+    const z = Number(c.z);
+    if(!Number.isFinite(z)) continue;
+    if(z < minZ) continue;
+    L.rectangle([[c.lat_min,c.lon_min],[c.lat_max,c.lon_max]],{
+      fillColor: colorForZ(z),
+      fillOpacity: 1,
+      color: "rgba(127,127,127,0.35)",
+      weight: 1
+    }).addTo(heat);
+    drawn++;
+  }
+
+  // Top anomalies
+  const top = cells
+    .map(c => ({...c, znum: Number(c.z), lam: Number(c.lambda_7)}))
+    .filter(c => Number.isFinite(c.znum) && c.znum >= minZ)
+    .sort((a,b) => b.znum - a.znum)
+    .slice(0, 10);
+
+  if(top.length === 0){
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td colspan="5" class="muted">No cells above threshold.</td>`;
+    hotEl.appendChild(tr);
+  } else {
+    for(const c of top){
+      const tr = document.createElement("tr");
+      const maxM = (c.maxmag_30d ?? "—");
+      tr.innerHTML =
+        `<td><b>${c.znum.toFixed(2)}</b></td>`+
+        `<td>${c.count_7d}</td>`+
+        `<td>${Number.isFinite(c.lam) ? c.lam.toFixed(2) : "—"}</td>`+
+        `<td>${maxM}</td>`+
+        `<td><button class="btn">Zoom</button></td>`;
+      tr.querySelector("button").onclick = () => {
+        map.fitBounds([[c.lat_min,c.lon_min],[c.lat_max,c.lon_max]], { padding: [30,30] });
+      };
+      hotEl.appendChild(tr);
+    }
+  }
+
+  // Zoom presets
+  if(mode === "italy"){
+    map.setView([43, 12], 6);
+  } else {
+    map.setView([20, 0], 2);
+  }
+
+  // update stats line with plotted counts
+  statsEl.textContent += ` | plotted points: ${plotted} | heat cells: ${drawn}`;
+}
+
+async function loadAll(){
+  const cb = Date.now();
+
+  const eurl = (mode==="world" ? "events.json" : "italy_events.json") + "?cb=" + cb;
+  const gurl = (mode==="world" ? "grid.json" : "italy_grid.json") + "?cb=" + cb;
+  const burl = "backtest.json?cb=" + cb;
+
+  metaEl.textContent = "Loading…";
+  statsEl.textContent = "";
+  btEl.textContent = "Backtest: loading…";
+
+  try{
+    const [re, rg, rb] = await Promise.all([
+      fetch(eurl, { cache: "no-store" }),
+      fetch(gurl, { cache: "no-store" }),
+      fetch(burl, { cache: "no-store" }).catch(()=>null),
+    ]);
+
+    if(!re.ok) throw new Error(`events fetch failed: ${re.status} ${re.statusText}`);
+    if(!rg.ok) throw new Error(`grid fetch failed: ${rg.status} ${rg.statusText}`);
+
+    eventsData = await re.json();
+    gridData = await rg.json();
+
+    if (rb && rb.ok){
+      backtestData = await rb.json();
+    } else {
+      backtestData = null;
+    }
+
+    renderBacktest();
+    render();
+  } catch(err){
+    console.error(err);
+    metaEl.textContent = "ERRORE: impossibile caricare i dati";
+    statsEl.textContent = String(err);
+    btEl.textContent = "Backtest: error";
+  }
+}
+
+minZEl.oninput = render;
+
+// boot
+loadAll();
+</script>
+
+</body>
+</html>

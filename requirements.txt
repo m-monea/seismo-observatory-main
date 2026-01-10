@@ -1,0 +1,5 @@
+## `requirements.txt`
+
+```txt
+# No external dependencies required (standard library only).
+# Future steps may add: numpy, pandas, pyarrow, scipy, plotly, etc.
