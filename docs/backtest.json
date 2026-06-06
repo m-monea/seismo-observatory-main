@@ -1,1 +1,1 @@
-{"error": "no hot cells"}
+{"threshold_z": 2.5, "target_mag": 4.5, "large_events": 424, "hits_in_hot": 6, "hot_area_frac": 1.54320987654321e-05, "hit_frac": 0.014150943396226415, "enrichment": 916.9811320754717}
