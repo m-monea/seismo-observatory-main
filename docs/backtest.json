@@ -1,1 +1,1 @@
-{"threshold_z": 2.5, "target_mag": 4.5, "large_events": 507, "hits_in_hot": 20, "hot_area_frac": 9.259259259259259e-05, "hit_frac": 0.03944773175542406, "enrichment": 426.0355029585799}
+{"threshold_z": 2.5, "target_mag": 4.5, "large_events": 512, "hits_in_hot": 20, "hot_area_frac": 9.259259259259259e-05, "hit_frac": 0.0390625, "enrichment": 421.875}
